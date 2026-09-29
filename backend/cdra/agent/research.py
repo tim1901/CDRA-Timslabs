@@ -28,15 +28,16 @@ class ResearchAgent:
             search_hits += len(results)
             for r in results:
                 if r.url in seen: continue
-                seen.add(r.url); urls.append(r.url); candidates.append((kind,r.url))
+                seen.add(r.url); urls.append(r.url); candidates.append((kind,r.url,r.published_date))
                 if len(urls) >= settings.max_pages_per_company: break
             if len(urls) >= settings.max_pages_per_company: break
         developments=[]
-        for kind,url in candidates:
+        for kind,url,published_date in candidates:
             page=self.fetcher.fetch(url)
             if not page or len(page.text)<250:
                 fetch_failures += 1
                 continue
+            page.published_date = published_date
             extracted=self.llm.extract(company,kind,page,window_from,window_to)
             for d in extracted:
                 d.source.published_date=d.date
