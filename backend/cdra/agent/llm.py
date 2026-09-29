@@ -5,7 +5,7 @@ from ..models.schemas import Development
 
 logger = logging.getLogger(__name__)
 
-SYSTEM = """You are CDRA, an evidence-first company development research agent. Extract only developments supported by the supplied source text. Never invent dates, people, transactions, URLs, or claims. A time-windowed result must have an explicit publication/announcement date. Separate factual evidence from GTM interpretation. Return JSON only."""
+SYSTEM = """You are CDRA, an evidence-first company development research agent. Extract developments supported by the supplied publisher text OR the supplied discovery metadata/snippet. Never invent dates, people, transactions, URLs, or claims. The discovery publication date may be used as the publication date when supplied by the search provider. If the title and snippet clearly describe a qualifying company development, you may extract it even when the publisher page is unavailable or thin. Separate factual evidence from GTM interpretation. Return JSON only."""
 
 class LLM:
     def __init__(self, api_key: str | None, model: str):
@@ -23,7 +23,7 @@ class LLM:
             self.failures += 1
             return []
 
-        prompt = f"""Company: {company}\nRequested category: {kind}\nWindow: {window_from} to {window_to}\nURL: {page.url}\nTitle: {page.title}\nSearch publication date (when supplied by the discovery source): {getattr(page, "published_date", None)}\n\nSOURCE TEXT:\n{page.text}\n\nReturn {{\"developments\":[{{\"type\":\"{kind}\",\"date\":\"YYYY-MM-DD\",\"title\":\"...\",\"summary\":\"...\",\"evidence\":\"short exact evidence quote or close factual excerpt\",\"confidence\":0.0,\"gtm_relevance\":\"...\",\"related_signals\":[]}}]}}. If no qualifying development exists, return an empty list. Only use information present in the source."""
+        prompt = f"""Company: {company}\nRequested category: {kind}\nWindow: {window_from} to {window_to}\nURL: {page.url}\nTitle: {page.title}\nSearch publication date (when supplied by the discovery source): {getattr(page, "published_date", None)}\nDiscovery snippet: {getattr(page, "discovery_snippet", "")}\n\nSOURCE TEXT:\n{page.text}\n\nReturn {{\"developments\":[{{\"type\":\"{kind}\",\"date\":\"YYYY-MM-DD\",\"title\":\"...\",\"summary\":\"...\",\"evidence\":\"short exact evidence quote or close factual excerpt\",\"confidence\":0.0,\"gtm_relevance\":\"...\",\"related_signals\":[]}}]}}. If no qualifying development exists, return an empty list. Use the supplied publication date when it is within the requested window. Evidence must come from the supplied source text, title, or discovery snippet."""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
