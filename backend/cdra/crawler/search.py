@@ -52,7 +52,7 @@ class Searcher:
             out.append(SearchResult(title, href, snippet))
         return out
 
-    def _parse_bing_rss(self, xml: str) -> list[SearchResult]:
+    def _parse_rss(self, xml: str) -> list[SearchResult]:
         out = []
         root = ET.fromstring(xml)
         for item in root.findall(".//item")[: self.max_results]:
@@ -99,13 +99,32 @@ class Searcher:
         if not xml:
             return []
         try:
-            return self._parse_bing_rss(xml)
+            return self._parse_rss(xml)
+        except Exception:
+            return []
+
+    def search_google_news_rss(self, query: str) -> list[SearchResult]:
+        # Google News exposes a public RSS search feed; no API key is required.
+        url = (
+            "https://news.google.com/rss/search?q=" + quote(query)
+            + "&hl=en-US&gl=US&ceid=US:en"
+        )
+        xml = self._request(url, accept="application/rss+xml,application/xml,text/xml")
+        if not xml:
+            return []
+        try:
+            return self._parse_rss(xml)
         except Exception:
             return []
 
     def search(self, query: str) -> list[SearchResult]:
-        # Try multiple public search surfaces. We do not depend on a paid search API.
-        for method in (self.search_duckduckgo, self.search_duckduckgo_lite, self.search_bing_rss):
+        # Try several public discovery surfaces. We do not depend on a paid search API.
+        for method in (
+            self.search_google_news_rss,
+            self.search_duckduckgo,
+            self.search_duckduckgo_lite,
+            self.search_bing_rss,
+        ):
             results = method(query)
             if results:
                 return results
