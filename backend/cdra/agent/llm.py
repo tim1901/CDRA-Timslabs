@@ -23,7 +23,7 @@ class LLM:
             self.failures += 1
             return []
 
-        prompt = f"""Company: {company}\nRequested category: {kind}\nWindow: {window_from} to {window_to}\nURL: {page.url}\nTitle: {page.title}\n\nSOURCE TEXT:\n{page.text}\n\nReturn {{\"developments\":[{{\"type\":\"{kind}\",\"date\":\"YYYY-MM-DD\",\"title\":\"...\",\"summary\":\"...\",\"evidence\":\"short exact evidence quote or close factual excerpt\",\"confidence\":0.0,\"gtm_relevance\":\"...\",\"related_signals\":[]}}]}}. If no qualifying development exists, return an empty list. Only use information present in the source."""
+        prompt = f"""Company: {company}\nRequested category: {kind}\nWindow: {window_from} to {window_to}\nURL: {page.url}\nTitle: {page.title}\nSearch publication date (when supplied by the discovery source): {getattr(page, "published_date", None)}\n\nSOURCE TEXT:\n{page.text}\n\nReturn {{\"developments\":[{{\"type\":\"{kind}\",\"date\":\"YYYY-MM-DD\",\"title\":\"...\",\"summary\":\"...\",\"evidence\":\"short exact evidence quote or close factual excerpt\",\"confidence\":0.0,\"gtm_relevance\":\"...\",\"related_signals\":[]}}]}}. If no qualifying development exists, return an empty list. Only use information present in the source."""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -37,7 +37,9 @@ class LLM:
             data = json.loads(content)
             out=[]
             for item in data.get("developments", []):
-                item["source"]={"name": page.title, "url": page.url}
+                if not item.get("date") and getattr(page, "published_date", None):
+                    item["date"] = page.published_date
+                item["source"]={"name": page.title, "url": page.url, "published_date": item.get("date")}
                 out.append(Development.model_validate(item))
             self.successes += 1
             return out
