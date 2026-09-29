@@ -28,16 +28,28 @@ class ResearchAgent:
             search_hits += len(results)
             for r in results:
                 if r.url in seen: continue
-                seen.add(r.url); urls.append(r.url); candidates.append((kind,r.url,r.published_date))
+                seen.add(r.url); urls.append(r.url); candidates.append((kind,r.url,r.published_date,r.title,r.snippet))
                 if len(urls) >= settings.max_pages_per_company: break
             if len(urls) >= settings.max_pages_per_company: break
         developments=[]
-        for kind,url,published_date in candidates:
-            page=self.fetcher.fetch(url)
-            if not page or len(page.text)<250:
-                fetch_failures += 1
-                continue
+        for kind,url,published_date,title,snippet in candidates:
+            page=self.fetcher.fetch(url, fallback_title=title, fallback_snippet=snippet, published_date=published_date)
+            if not page:
+                # RSS discovery metadata is still useful evidence when the
+                # publisher page blocks automated fetching.
+                from .fetch import Page
+                page = Page(
+                    url=url,
+                    title=title,
+                    text=f"{title}\\n\\n{snippet}",
+                    published_date=published_date,
+                    discovery_snippet=snippet,
+                )
+                if len(page.text) < 80:
+                    fetch_failures += 1
+                    continue
             page.published_date = published_date
+            page.discovery_snippet = snippet
             extracted=self.llm.extract(company,kind,page,window_from,window_to)
             for d in extracted:
                 d.source.published_date=d.date
@@ -53,7 +65,7 @@ class ResearchAgent:
             if self.searcher.provider_status:
                 warnings.append("Search provider diagnostics: " + "; ".join(f"{name}: {status}" for name, status in self.searcher.provider_status.items()))
         if candidates and fetch_failures == len(candidates):
-            warnings.append("Search results were found, but none of the source pages could be fetched.")
+            warnings.append("Search results were found, but none of the source pages or discovery snippets contained enough evidence to analyze.")
         if self.llm.attempts and self.llm.failures == self.llm.attempts:
             warnings.append(f"LLM extraction failed on all {self.llm.attempts} source attempts. Last error: {self.llm.last_error}")
         elif self.llm.failures:
