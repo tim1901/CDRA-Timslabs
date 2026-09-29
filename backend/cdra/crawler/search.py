@@ -1,8 +1,11 @@
+import logging
 import re
 from urllib.parse import quote, urlparse, parse_qs, unquote
 import httpx
 from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
+
+logger = logging.getLogger(__name__)
 
 class SearchResult:
     def __init__(self, title: str, url: str, snippet: str = ""):
@@ -69,7 +72,8 @@ class Searcher:
             r = self.client.get(url, headers={"Accept": accept, "Referer": "https://www.google.com/"})
             r.raise_for_status()
             return r.text
-        except Exception:
+        except Exception as exc:
+            logger.warning("Search request failed for %s: %s", url.split("?")[0], exc)
             return None
 
     def search_duckduckgo(self, query: str) -> list[SearchResult]:
@@ -114,7 +118,8 @@ class Searcher:
             return []
         try:
             return self._parse_rss(xml)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Google News RSS parse failed: %s", exc)
             return []
 
     def search(self, query: str) -> list[SearchResult]:
