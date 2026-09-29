@@ -4,12 +4,13 @@ from urllib.parse import quote, urlparse, parse_qs, unquote
 import httpx
 from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 
 logger = logging.getLogger(__name__)
 
 class SearchResult:
-    def __init__(self, title: str, url: str, snippet: str = ""):
-        self.title, self.url, self.snippet = title, url, snippet
+    def __init__(self, title: str, url: str, snippet: str = "", published_date: str | None = None):
+        self.title, self.url, self.snippet, self.published_date = title, url, snippet, published_date
 
 class Searcher:
     def __init__(self, client: httpx.Client, max_results: int = 6):
@@ -62,9 +63,16 @@ class Searcher:
             title = item.findtext("title", default="").strip()
             href = item.findtext("link", default="").strip()
             snippet = item.findtext("description", default="").strip()
+            pub_date = item.findtext("pubDate", default="").strip()
+            published_date = None
+            if pub_date:
+                try:
+                    published_date = parsedate_to_datetime(pub_date).date().isoformat()
+                except Exception:
+                    published_date = None
             href = self._normalise_url(href)
             if href and title:
-                out.append(SearchResult(title, href, BeautifulSoup(snippet, "html.parser").get_text(" ", strip=True)[:500]))
+                out.append(SearchResult(title, href, BeautifulSoup(snippet, "html.parser").get_text(" ", strip=True)[:500], published_date))
         return out
 
     def _request(self, url: str, accept: str = "text/html,application/xhtml+xml") -> str | None:
