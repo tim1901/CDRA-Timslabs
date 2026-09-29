@@ -50,6 +50,8 @@ class ResearchAgent:
         developments=sorted(unique.values(), key=lambda x:x.date, reverse=True)
         if search_hits == 0:
             warnings.append("Search providers returned no results for the selected queries.")
+            if self.searcher.provider_status:
+                warnings.append("Search provider diagnostics: " + "; ".join(f"{name}: {status}" for name, status in self.searcher.provider_status.items()))
         if candidates and fetch_failures == len(candidates):
             warnings.append("Search results were found, but none of the source pages could be fetched.")
         if self.llm.attempts and self.llm.failures == self.llm.attempts:
