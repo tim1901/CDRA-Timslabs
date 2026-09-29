@@ -1,7 +1,7 @@
 import json
 import logging
 from openai import OpenAI
-from ..models import Development
+from ..models.schemas import Development
 
 logger = logging.getLogger(__name__)
 
