@@ -8,7 +8,8 @@ SignalType = Literal[
 ]
 
 class ResearchRequest(BaseModel):
-    company: str = Field(min_length=1, max_length=300)
+    company: str = Field(default="", max_length=300)
+    company_website: str | None = Field(default=None, max_length=500)
     lookback_months: int = Field(default=6, ge=1, le=60)
     research_types: list[SignalType] = Field(default_factory=lambda: [
         "leadership", "ma", "news", "transformation", "partnerships", "funding",
