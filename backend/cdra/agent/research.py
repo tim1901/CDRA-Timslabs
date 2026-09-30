@@ -24,12 +24,11 @@ def _entity_match(
     snippet: str,
     text: str,
 ) -> bool:
-    """Strict deterministic entity gate.
+    """Strict entity gate anchored to the supplied company URL.
 
-    The supplied company URL/domain is authoritative. First-party pages on
-    that domain are accepted; third-party pages must contain the exact
-    company identity in the title, snippet, or article text. Ambiguous fuzzy
-    matches are rejected instead of being handed to the LLM.
+    For a known domain, third-party evidence must identify the domain-branded
+    company (e.g. "apollo.io"), not merely a generic/ambiguous brand word
+    (e.g. "Apollo"). First-party pages are accepted by canonical domain.
     """
     host = urlparse(url).netloc.lower().removeprefix("www.")
     target_domain = domain.lower().removeprefix("www.") if domain else None
@@ -37,28 +36,37 @@ def _entity_match(
     if target_domain and (host == target_domain or host.endswith("." + target_domain)):
         return True
 
-    target = _normalize_text(company)
-    if not target:
-        return False
-
     fields = [
         _normalize_text(title),
         _normalize_text(snippet),
         _normalize_text(text[:20000]),
     ]
 
-    # Exact normalized company phrase, not fuzzy token overlap.
-    if any(re.search(rf"(?<![a-z0-9]){re.escape(target)}(?![a-z0-9])", field) for field in fields):
-        return True
+    if target_domain:
+        # Domain identity: apollo.io -> "apollo io".
+        # This deliberately does NOT accept a bare "apollo" match.
+        domain_identity = _normalize_text(target_domain)
+        if any(
+            re.search(
+                rf"(?<![a-z0-9]){re.escape(domain_identity)}(?![a-z0-9])",
+                field,
+            )
+            for field in fields
+        ):
+            return True
 
-    # For multi-word names, allow the full set of words only when they appear
-    # together in the title/snippet. This avoids accepting unrelated companies
-    # that merely share one common word.
-    target_tokens = target.split()
-    if len(target_tokens) > 1:
-        for field in fields[:2]:
-            if all(re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", field) for token in target_tokens):
-                return True
+    target = _normalize_text(company)
+    if not target:
+        return False
+
+    # If the supplied domain is known, only allow the company-name fallback
+    # for multi-word identities. A single generic word is too ambiguous.
+    if not target_domain or len(target.split()) > 1:
+        if any(
+            re.search(rf"(?<![a-z0-9]){re.escape(target)}(?![a-z0-9])", field)
+            for field in fields
+        ):
+            return True
 
     return False
 
@@ -123,13 +131,7 @@ class ResearchAgent:
                     continue
                 seen.add(result.url)
                 candidates.append(
-                    (
-                        kind,
-                        result.url,
-                        result.published_date,
-                        result.title,
-                        result.snippet,
-                    )
+                    (kind, result.url, result.published_date, result.title, result.snippet)
                 )
                 if len(candidates) >= settings.max_pages_per_company:
                     break
@@ -160,21 +162,13 @@ class ResearchAgent:
             page.published_date = published_date
             page.discovery_snippet = snippet
 
-            # Reject unrelated/similarly named companies before spending an LLM
-            # call. The LLM remains responsible for materiality and final
-            # signal classification.
             if not _entity_match(company, domain, url, page.title, snippet, page.text):
                 rejected_entities += 1
                 continue
 
             llm_candidates += 1
             extracted = self.llm.extract(
-                company,
-                domain,
-                kind,
-                page,
-                window_from,
-                window_to,
+                company, domain, kind, page, window_from, window_to
             )
             for development in extracted:
                 if window_from <= development.date <= window_to:
@@ -199,7 +193,9 @@ class ResearchAgent:
             )
 
         if llm_candidates:
-            warnings.append(f"Validated {llm_candidates} company-specific candidates with the evidence model.")
+            warnings.append(
+                f"Validated {llm_candidates} company-specific candidates with the evidence model."
+            )
 
         if candidates and fetch_failures == len(candidates):
             warnings.append(
