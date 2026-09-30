@@ -34,21 +34,25 @@ def build_queries(
     if cutoff.year != date.today().year:
         years = f"{cutoff.year} {date.today().year}"
 
-    # Domain-qualified identity is used for external discovery when available.
-    # Keep the human-readable company name for first-party site searches.
-    search_identity = domain if domain else company
-
     queries: list[tuple[str, str]] = []
     for kind in types:
         template = QUERIES.get(kind)
         if not template:
             continue
 
-        external = template.format(company=search_identity, year=years)
-        queries.append((kind, external))
-
         if domain:
+            # Keep the human-readable company name for natural-language search,
+            # while anchoring results to the canonical domain as an additional
+            # identity signal. Searching only for "apollo.io" is too literal
+            # and can miss articles that simply say "Apollo".
+            external = f'"{company}" "{domain}" {template.format(company=company, year=years)}'
             first_party = f"site:{domain} {template.format(company=company, year=years)}"
+        else:
+            external = template.format(company=company, year=years)
+            first_party = None
+
+        queries.append((kind, external))
+        if first_party:
             queries.append((kind, first_party))
 
     return queries
