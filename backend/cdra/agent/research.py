@@ -96,13 +96,13 @@ class ResearchAgent:
                 if canonical in seen:
                     continue
                 seen.add(canonical)
-                candidates.append(("parallel", url, None, title, str(finding.get("evidence_excerpt") or "")))
+                candidates.append({"kind":"parallel","url":url,"published_date":finding.get("event_date") or None,"title":title,"snippet":str(finding.get("evidence_excerpt") or ""),"parallel_finding":finding})
                 for corroborating in finding.get("corroborating_sources") or []:
                     if isinstance(corroborating, str) and corroborating.startswith(("http://", "https://")):
                         c = corroborating.split("#", 1)[0].rstrip("/")
                         if c not in seen:
                             seen.add(c)
-                            candidates.append(("parallel", corroborating, None, "Corroborating source", ""))
+                            candidates.append({"kind":"parallel","url":corroborating,"published_date":None,"title":"Corroborating source","snippet":"","parallel_finding":finding})
                 if len(candidates) >= settings.max_pages_per_company:
                     break
         else:
@@ -111,7 +111,7 @@ class ResearchAgent:
                     canonical = result.url.split("#", 1)[0].rstrip("/")
                     if canonical not in seen:
                         seen.add(canonical)
-                        candidates.append(("first_party", result.url, result.published_date, result.title, result.snippet))
+                        candidates.append({"kind":"first_party","url":result.url,"published_date":result.published_date,"title":result.title,"snippet":result.snippet,"parallel_finding":None})
             queries = build_queries(company, lookback_months, types, domain=domain)
             for kind, query in queries:
                 results = self.searcher.search(query)
@@ -121,17 +121,20 @@ class ResearchAgent:
                     if canonical in seen:
                         continue
                     seen.add(canonical)
-                    candidates.append((kind, result.url, result.published_date, result.title, result.snippet))
+                    candidates.append({"kind":kind,"url":result.url,"published_date":result.published_date,"title":result.title,"snippet":result.snippet,"parallel_finding":None})
                     if len(candidates) >= settings.max_pages_per_company:
                         break
                 if len(candidates) >= settings.max_pages_per_company:
                     break
 
-        first_party_count = sum(1 for item in candidates if item[0] == "first_party")
+        first_party_count = sum(1 for item in candidates if item["kind"] == "first_party")
         candidates = candidates[:settings.max_pages_per_company]
 
         developments = []
-        for kind, url, published_date, title, snippet in candidates:
+        for candidate in candidates:
+            kind, url = candidate["kind"], candidate["url"]
+            published_date, title, snippet = candidate["published_date"], candidate["title"], candidate["snippet"]
+            parallel_finding = candidate.get("parallel_finding")
             page = self.fetcher.fetch(url, fallback_title=title, fallback_snippet=snippet, published_date=published_date)
             if not page:
                 page = Page(url=url, title=title, text=f"{title}\n\n{snippet}", published_date=published_date, discovery_snippet=snippet)
@@ -144,7 +147,7 @@ class ResearchAgent:
                 rejected_entities += 1
                 continue
             llm_candidates += 1
-            extracted = self.llm.extract(company, domain, kind, page, window_from, window_to)
+            extracted = self.llm.extract(company, domain, kind, page, window_from, window_to, research_hint=parallel_finding)
             for development in extracted:
                 if window_from <= development.date <= window_to:
                     developments.append(development)
@@ -182,7 +185,7 @@ class ResearchAgent:
             research_window_to=window_to,
             developments=developments,
             sources_scanned=len(candidates),
-            source_urls=[item[1] for item in candidates],
+            source_urls=[item["url"] for item in candidates],
             warnings=warnings,
             status=status,
         )
