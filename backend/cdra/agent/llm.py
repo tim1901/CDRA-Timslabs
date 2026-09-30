@@ -125,7 +125,7 @@ class LLM:
         candidate = aliases.get(candidate, candidate)
         return candidate if candidate in VALID_TYPES else None
 
-    def extract(self, company: str, domain: str | None, kind: str, page, window_from: str, window_to: str):
+    def extract(self, company: str, domain: str | None, kind: str, page, window_from: str, window_to: str, research_hint: dict | None = None):
         self.attempts += 1
         if not self.client:
             self.last_error = "OPENAI_API_KEY is not configured"
@@ -135,6 +135,20 @@ class LLM:
         source_kind = _source_kind(page.url)
         fallback_date = getattr(page, "published_date", None)
         discovery_snippet = getattr(page, "discovery_snippet", "") or ""
+        parallel_hint = ""
+        if research_hint:
+            parallel_hint = json.dumps({
+                "signal_type": research_hint.get("signal_type"),
+                "event_date": research_hint.get("event_date"),
+                "title": research_hint.get("title"),
+                "concise_summary": research_hint.get("concise_summary"),
+                "what_changed": research_hint.get("what_changed"),
+                "why_it_matters": research_hint.get("why_it_matters"),
+                "gtm_relevance": research_hint.get("gtm_relevance"),
+                "evidence_excerpt": research_hint.get("evidence_excerpt"),
+                "confidence": research_hint.get("confidence"),
+                "corroborating_sources": research_hint.get("corroborating_sources") or [],
+            }, ensure_ascii=False)
 
         # Keep the model focused on the evidence-bearing part of a page. This
         # also prevents long help/docs pages from drowning out the actual event.
@@ -152,6 +166,9 @@ SOURCE URL: {page.url}
 SOURCE TITLE: {page.title}
 DISCOVERY PUBLICATION DATE: {fallback_date}
 DISCOVERY SNIPPET: {discovery_snippet}
+
+PARALLEL RESEARCH HYPOTHESIS (UNTRUSTED; VERIFY AGAINST SOURCE):
+{parallel_hint or "None"}
 
 SOURCE TEXT:
 {source_text}
@@ -186,6 +203,7 @@ Rules:
 - Every reported date must be inside {window_from} to {window_to}.
 - If the event date is not explicit, use the discovery publication date only when it is clearly tied to the announcement.
 - Evidence must be supported by SOURCE TITLE, DISCOVERY SNIPPET, or SOURCE TEXT.
+- Treat the Parallel research hypothesis as a discovery aid only. Never copy its classification, date, summary, confidence, or GTM interpretation unless the fetched source independently supports it.
 - Confidence below 0.60 means insufficient evidence: omit the item.
 - If the source is not about {company}, or no material development is supported, return {{"developments":[]}}.
 """
