@@ -86,7 +86,7 @@ class ResearchAgent:
         # CDRA's existing evidence/LLM validation layer before returning it.
         parallel_findings = []
         if domain and self.searcher.parallel_task:
-            parallel_findings = self.searcher.task_research(company, domain, window_from, window_to)
+            parallel_findings = self.searcher.task_research(company_website or identity_input, window_from, window_to)
             for finding in parallel_findings:
                 url = str(finding.get("source_url") or "").strip()
                 title = str(finding.get("source_title") or finding.get("title") or "").strip()
