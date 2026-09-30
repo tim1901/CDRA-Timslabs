@@ -273,7 +273,7 @@ Return only qualifying developments in the requested research window."""
             self.provider_status["Parallel Task"] = "running"
             run = self.parallel_task.task_run.create(
                 input=prompt,
-                processor="core",
+                processor="lite",
                 task_spec={"output_schema": output_schema},
             )
             # The Task API is asynchronous. Use the dedicated long-timeout
