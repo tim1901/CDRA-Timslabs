@@ -14,7 +14,7 @@ def health(): return {"status":"ok","service":"cdra"}
 
 @app.post("/research")
 def research(req: ResearchRequest):
-    return ResearchAgent().run(req.company, req.lookback_months, req.research_types)
+    return ResearchAgent().run(req.company or req.company_website or "", req.lookback_months, req.research_types, company_website=req.company_website)
 
 @app.post("/research/batch")
 def research_batch(req: BatchResearchRequest):
