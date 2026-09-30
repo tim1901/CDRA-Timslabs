@@ -6,7 +6,7 @@ import re
 import httpx
 from ..config import settings
 from ..crawler.search import Searcher
-from ..crawler.fetch import Fetcher
+from ..crawler.fetch import Fetcher, Page
 from ..crawler.company import normalize_company
 from .planner import build_queries
 from .llm import LLM
@@ -93,7 +93,6 @@ class ResearchAgent:
         for kind,url,published_date,title,snippet in candidates:
             page=self.fetcher.fetch(url, fallback_title=title, fallback_snippet=snippet, published_date=published_date)
             if not page:
-                from .fetch import Page
                 page = Page(url=url,title=title,text=f"{title}\n\n{snippet}",published_date=published_date,discovery_snippet=snippet)
                 if len(page.text) < 80:
                     fetch_failures += 1
