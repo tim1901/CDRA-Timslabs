@@ -64,8 +64,13 @@ class ResearchAgent:
         self.fetcher = Fetcher(self.client)
         self.llm = LLM(settings.openai_api_key, settings.openai_model)
 
-    def run(self, company_input: str, lookback_months: int, types: list[str]) -> CompanyResult:
-        company, domain = normalize_company(company_input)
+    def run(self, company_input: str, lookback_months: int, types: list[str], company_website: str | None = None) -> CompanyResult:
+        identity_input = company_website or company_input
+        company, domain = normalize_company(identity_input)
+        if not domain and company_input:
+            fallback_company, fallback_domain = normalize_company(company_input)
+            company = fallback_company or company
+            domain = fallback_domain or domain
         window_from = (date.today() - relativedelta(months=lookback_months)).isoformat()
         window_to = date.today().isoformat()
         warnings = []
@@ -76,32 +81,53 @@ class ResearchAgent:
         rejected_entities = 0
         llm_candidates = 0
 
-        # Build a broad candidate pool from direct first-party discovery plus
-        # complementary web/news search. Google News is now one discovery
-        # channel rather than the critical path.
-        if domain:
-            for result in self.searcher.discover_first_party(domain, max_pages=16):
-                canonical = result.url.split("#", 1)[0].rstrip("/")
-                if canonical not in seen:
-                    seen.add(canonical)
-                    candidates.append(("first_party", result.url, result.published_date, result.title, result.snippet))
-        first_party_count = len(candidates)
-
-        queries = build_queries(company, lookback_months, types, domain=domain)
-        for kind, query in queries:
-            results = self.searcher.search(query)
-            search_hits += len(results)
-            for result in results:
-                canonical = result.url.split("#", 1)[0].rstrip("/")
+        # Parallel Task performs the broad multi-signal web research in one
+        # structured run. We still fetch each cited source and pass it through
+        # CDRA's existing evidence/LLM validation layer before returning it.
+        parallel_findings = []
+        if domain and self.searcher.parallel:
+            parallel_findings = self.searcher.task_research(company, domain, window_from, window_to)
+            for finding in parallel_findings:
+                url = str(finding.get("source_url") or "").strip()
+                title = str(finding.get("source_title") or finding.get("title") or "").strip()
+                if not url or not title:
+                    continue
+                canonical = url.split("#", 1)[0].rstrip("/")
                 if canonical in seen:
                     continue
                 seen.add(canonical)
-                candidates.append((kind, result.url, result.published_date, result.title, result.snippet))
+                candidates.append(("parallel", url, None, title, str(finding.get("evidence_excerpt") or "")))
+                for corroborating in finding.get("corroborating_sources") or []:
+                    if isinstance(corroborating, str) and corroborating.startswith(("http://", "https://")):
+                        c = corroborating.split("#", 1)[0].rstrip("/")
+                        if c not in seen:
+                            seen.add(c)
+                            candidates.append(("parallel", corroborating, None, "Corroborating source", ""))
                 if len(candidates) >= settings.max_pages_per_company:
                     break
-            if len(candidates) >= settings.max_pages_per_company:
-                break
+        else:
+            if domain:
+                for result in self.searcher.discover_first_party(domain, max_pages=16):
+                    canonical = result.url.split("#", 1)[0].rstrip("/")
+                    if canonical not in seen:
+                        seen.add(canonical)
+                        candidates.append(("first_party", result.url, result.published_date, result.title, result.snippet))
+            queries = build_queries(company, lookback_months, types, domain=domain)
+            for kind, query in queries:
+                results = self.searcher.search(query)
+                search_hits += len(results)
+                for result in results:
+                    canonical = result.url.split("#", 1)[0].rstrip("/")
+                    if canonical in seen:
+                        continue
+                    seen.add(canonical)
+                    candidates.append((kind, result.url, result.published_date, result.title, result.snippet))
+                    if len(candidates) >= settings.max_pages_per_company:
+                        break
+                if len(candidates) >= settings.max_pages_per_company:
+                    break
 
+        first_party_count = sum(1 for item in candidates if item[0] == "first_party")
         candidates = candidates[:settings.max_pages_per_company]
 
         developments = []
