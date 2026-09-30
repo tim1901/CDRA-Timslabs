@@ -20,6 +20,8 @@ SIGNAL_DEFINITIONS = {
     "regulatory": "The target company received, faced, or announced a material regulatory approval, ruling, investigation, or compliance action.",
 }
 
+VALID_TYPES = ", ".join(SIGNAL_DEFINITIONS.keys())
+
 SYSTEM = """You are CDRA, an evidence-first company development research agent.
 
 Your job is to reject false positives, not to force every search result into a requested category.
@@ -30,8 +32,8 @@ The requested category is a SEARCH HINT, not a classification instruction. Deter
 
 Never invent dates, people, transactions, URLs, or claims. Keep the event within the supplied research window. Do not treat generic commentary or industry trends as company developments.
 
-Return JSON only. Use confidence to represent evidence quality, not enthusiasm. If the company match or event evidence is weak, return no development."""
-    
+Return a single JSON object with a "developments" array. Use confidence to represent evidence quality, not enthusiasm. If the company match or event evidence is weak, return an empty array."""
+
 class LLM:
     def __init__(self, api_key: str | None, model: str):
         self.client = OpenAI(api_key=api_key) if api_key else None
@@ -54,6 +56,7 @@ Target domain: {domain or "unknown"}
 Research window: {window_from} to {window_to}
 Search category: {kind}
 Search category definition: {definition}
+Valid signal types: {VALID_TYPES}
 
 SOURCE URL: {page.url}
 SOURCE TITLE: {page.title}
@@ -65,19 +68,22 @@ SOURCE TEXT:
 
 First decide whether this source is actually about the TARGET COMPANY and whether it describes a MATERIAL DEVELOPMENT. Then classify the event using the evidence, even if that differs from the search category.
 
-Return exactly:
-{{"is_about_target_company":true,"is_material_development":true,"type":"{kind}","date":"YYYY-MM-DD","title":"...","summary":"...","evidence":"short exact evidence quote or close factual excerpt","confidence":0.0,"gtm_relevance":"...","related_signals":[]}}
+Return exactly this shape:
+{{"developments":[{{"is_about_target_company":true,"is_material_development":true,"type":"product","date":"YYYY-MM-DD","title":"...","summary":"...","evidence":"short exact evidence quote or close factual excerpt","confidence":0.0,"gtm_relevance":"...","related_signals":[]}}]}}
 
-Return an empty developments array when the source is not about the target company, is not a material development, the event type does not meet its definition, or the evidence is insufficient:
+If the source is not about the target company, is not a material development, the event type does not meet its definition, or the evidence is insufficient, return:
 {{"developments":[]}}
 
 Rules:
 - Do not create a development from a generic product/help page, encyclopedia page, industry trend, or another company's announcement.
+- The "type" must be one of the valid signal types and must be chosen from the evidence; it does not have to equal the search category.
 - For leadership, name the person and the actual role change.
 - For M&A/funding/partnership/product/etc., the event must involve the target company itself.
 - The title must describe the target-company event, not a general topic.
 - Confidence below 0.60 means the evidence is insufficient; return no development.
-- Evidence must come from the supplied source title, text, or discovery snippet."""
+- Evidence must come from the supplied source title, text, or discovery snippet.
+- Do not use the publisher or URL domain alone as proof that an event happened; use the actual supplied evidence.
+"""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
