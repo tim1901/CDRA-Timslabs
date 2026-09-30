@@ -258,12 +258,19 @@ Return only qualifying developments in the requested research window."""
                 task_spec={"output_schema": output_schema},
             )
             result = self.parallel.task_run.result(run.run_id, api_timeout=1800)
-            content = getattr(getattr(result, "output", None), "content", None)
+            output = getattr(result, "output", None)
+            if output is None and isinstance(result, dict):
+                output = result.get("output")
+            content = getattr(output, "content", None)
+            if content is None and isinstance(output, dict):
+                content = output.get("content")
             if hasattr(content, "model_dump"):
                 content = content.model_dump()
             elif isinstance(content, str):
                 import json
                 content = json.loads(content)
+            if hasattr(content, "model_dump"):
+                content = content.model_dump()
             if not isinstance(content, dict):
                 raise ValueError("Parallel Task returned no structured object")
             findings = content.get("developments", [])
