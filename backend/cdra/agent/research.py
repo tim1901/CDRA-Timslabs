@@ -154,12 +154,14 @@ class ResearchAgent:
 
         developments = _dedupe(developments)
 
-        if search_hits == 0 and not first_party_count:
-            warnings.append("Discovery channels returned no results for the selected queries.")
+        if not candidates:
+            warnings.append("Discovery channels returned no research candidates for the selected company and window.")
         if self.searcher.provider_status:
             warnings.append("Discovery diagnostics: " + "; ".join(f"{name}: {status}" for name, status in self.searcher.provider_status.items()))
         if rejected_entities:
             warnings.append(f"Rejected {rejected_entities} search candidates as unrelated to the target company.")
+        if parallel_findings:
+            warnings.append(f"Parallel Task produced {len(parallel_findings)} research findings before source validation.")
         if llm_candidates:
             warnings.append(f"Validated {llm_candidates} company-specific candidates with the evidence model.")
         if first_party_count:
