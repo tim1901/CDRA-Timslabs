@@ -1,6 +1,8 @@
 import logging
 from urllib.parse import quote, urlparse, parse_qs, unquote, urljoin
 import httpx
+from parallel import Parallel
+from ..config import settings
 from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
@@ -29,6 +31,13 @@ class Searcher:
         self.client = client
         self.max_results = max_results
         self.provider_status: dict[str, str] = {}
+        self.parallel = None
+        if settings.parallel_api_key:
+            self.parallel = Parallel(
+                api_key=settings.parallel_api_key,
+                timeout=max(30, settings.request_timeout),
+                max_retries=2,
+            )
 
     def _normalise_url(self, href: str) -> str | None:
         if not href:
@@ -132,10 +141,48 @@ class Searcher:
             logger.warning("Bing Web RSS parse failed: %s", exc)
             return []
 
+    def search_parallel(self, query: str) -> list[SearchResult]:
+        if not self.parallel:
+            return []
+        objective = (
+            "Find recent, material company-specific developments relevant to B2B GTM research. "
+            "Prioritize first-party announcements, newsroom pages, product/release notes and reputable reporting. "
+            "Ignore generic pages, unrelated companies, educational content and evergreen pages."
+        )
+        try:
+            response = self.parallel.search(
+                objective=objective,
+                search_queries=[query],
+                mode="advanced",
+                max_results=self.max_results,
+                max_chars_per_result=5000,
+            )
+            results = []
+            for item in response:
+                url = getattr(item, "url", None)
+                title = getattr(item, "title", None) or ""
+                excerpt = getattr(item, "excerpt", None) or getattr(item, "snippet", None) or ""
+                published = getattr(item, "published_date", None) or getattr(item, "publish_date", None)
+                if not url or not title:
+                    continue
+                if hasattr(published, "isoformat"):
+                    published = published.isoformat()
+                results.append(SearchResult(title, url, str(excerpt)[:5000], published, "parallel"))
+            self.provider_status["Parallel Search"] = f"ok ({len(results)} results)"
+            logger.info("Parallel Search returned %d results for query: %s", len(results), query)
+            return results
+        except Exception as exc:
+            self.provider_status["Parallel Search"] = f"error: {type(exc).__name__}: {str(exc)[:160]}"
+            logger.warning("Parallel Search failed for query %s: %s", query, exc)
+            return []
+
     def search(self, query: str) -> list[SearchResult]:
-        # Google News and Bing Web are complementary discovery channels.
-        # Google News is not the primary research source; both are merged and
-        # deduplicated before source fetching and evidence validation.
+        # Parallel is the primary web research provider when PARALLEL_API_KEY
+        # is configured. RSS providers remain a resilience fallback.
+        if self.parallel:
+            results = self.search_parallel(query)
+            if results:
+                return results
         google = self.search_google_news_rss(query)
         bing = self.search_bing_rss(query)
         merged = []
