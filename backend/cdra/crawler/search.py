@@ -176,6 +176,107 @@ class Searcher:
             logger.warning("Parallel Search failed for query %s: %s", query, exc)
             return []
 
+    def task_research(self, company: str, domain: str, window_from: str, window_to: str) -> list[dict]:
+        """Run CDRA's full company-development research brief through Parallel Task API."""
+        if not self.parallel:
+            return []
+
+        prompt = f"""Research the company {company} ({domain}) for all material company developments that occurred between {window_from} and {window_to}.
+
+The goal is to identify evidence-backed developments that could provide useful go-to-market intelligence.
+
+Investigate ALL of the following signal categories:
+1. LEADERSHIP — appointments, departures, promotions, resignations, or major role changes involving executives or senior leaders.
+2. M&A — acquisitions, mergers, divestitures, strategic investments, minority investments, or companies/assets acquired or sold.
+3. NEWS — material company-specific announcements that do not fit a more specific category; exclude generic coverage, opinion, educational content, and articles that merely mention the company.
+4. TRANSFORMATION — material AI, digital transformation, automation, CRM, ERP, data, technology, operating-model, or business-process transformation initiatives.
+5. PARTNERSHIPS — formal strategic partnerships, alliances, integrations, technology/channel/distribution partnerships, co-selling arrangements, or major commercial collaborations.
+6. FUNDING — funding rounds, financing, debt financing, major investments received, recapitalization, IPO-related financing, or other material capital events.
+7. PRODUCT — significant product, platform, service, feature, or technology launches, releases, major upgrades, or material changes.
+8. EXPANSION — expansion into new countries, geographic markets, industries, customer segments, offices, facilities, regions, or other material market-footprint increases.
+9. PROCUREMENT — RFPs, tenders, major procurement initiatives, large contracts awarded to or by the company, or material enterprise purchasing/sourcing activity involving the company.
+10. HIRING — meaningful hiring expansions, major recruitment initiatives, new hiring programs, large talent investments, or significant workforce expansion; ignore ordinary individual job postings.
+11. RESTRUCTURING — layoffs, workforce reductions, reorganizations, restructuring, business-unit changes, operating-model changes, closures, spin-offs, or other significant organizational changes.
+12. REGULATORY — material regulatory approvals, investigations, rulings, enforcement actions, compliance changes, licenses, certifications, or other regulatory events that materially affect the company.
+
+Research requirements:
+- Prioritize first-party sources from the company's official website, newsroom, investor relations site, press releases, product documentation, release notes, regulatory filings, and official announcements.
+- Then use high-quality independent sources such as Reuters, Bloomberg, Financial Times, TechCrunch, WSJ, major industry publications, and reputable business media.
+- Use multiple sources when available to corroborate important developments.
+- Do not treat Google News, Bing, search-result pages, aggregators, or social-media posts as final evidence when the underlying article or company announcement can be found.
+- Do not include a development simply because the company is mentioned in an article.
+- Reject generic articles, educational pages, job boards, directory pages, Wikipedia, opinion pieces, and unrelated companies with similar names.
+- Every development must clearly concern {company}.
+- Only include developments whose event date falls within {window_from} to {window_to}.
+- Prefer the date the event actually occurred or was announced rather than a later update date.
+- Do not invent dates, facts, sources, or evidence.
+- If no qualifying development exists for a category, return no items for that category.
+
+For every qualifying development, collect: signal_type, event_date, title, concise_summary, what_changed, why_it_matters, gtm_relevance, companies_or_entities_involved, geography, source_url, source_title, source_type, evidence_excerpt, confidence, and corroborating_sources.
+
+For GTM relevance, consider sales strategy, marketing strategy, customer acquisition, market expansion, partnerships/channel strategy, product positioning, pricing/commercial strategy, sales technology, marketing technology, CRM/revenue operations, GTM hiring, competitive positioning, new customer segments, and geographic expansion. Do not assume every development has GTM relevance; explain it only when supported by evidence.
+
+Return only qualifying developments in the requested research window."""
+
+        output_schema = {
+            "type": "json",
+            "json_schema": {
+                "type": "object",
+                "properties": {
+                    "developments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "signal_type": {"type": "string"},
+                                "event_date": {"type": "string"},
+                                "title": {"type": "string"},
+                                "concise_summary": {"type": "string"},
+                                "what_changed": {"type": "string"},
+                                "why_it_matters": {"type": "string"},
+                                "gtm_relevance": {"type": "string"},
+                                "companies_or_entities_involved": {"type": "array", "items": {"type": "string"}},
+                                "geography": {"type": "string"},
+                                "source_url": {"type": "string"},
+                                "source_title": {"type": "string"},
+                                "source_type": {"type": "string"},
+                                "evidence_excerpt": {"type": "string"},
+                                "confidence": {"type": "number"},
+                                "corroborating_sources": {"type": "array", "items": {"type": "string"}}
+                            },
+                            "required": ["signal_type","event_date","title","concise_summary","what_changed","why_it_matters","gtm_relevance","source_url","source_title","source_type","evidence_excerpt","confidence","corroborating_sources"]
+                        }
+                    }
+                },
+                "required": ["developments"]
+            }
+        }
+        try:
+            run = self.parallel.task_run.create(
+                input=prompt,
+                processor="core",
+                task_spec={"output_schema": output_schema},
+            )
+            result = self.parallel.task_run.result(run.run_id, api_timeout=1800)
+            content = getattr(getattr(result, "output", None), "content", None)
+            if hasattr(content, "model_dump"):
+                content = content.model_dump()
+            elif isinstance(content, str):
+                import json
+                content = json.loads(content)
+            if not isinstance(content, dict):
+                raise ValueError("Parallel Task returned no structured object")
+            findings = content.get("developments", [])
+            if not isinstance(findings, list):
+                raise ValueError("Parallel Task returned an invalid developments list")
+            self.provider_status["Parallel Task"] = f"ok ({len(findings)} findings)"
+            logger.info("Parallel Task returned %d findings for %s", len(findings), domain)
+            return findings
+        except Exception as exc:
+            self.provider_status["Parallel Task"] = f"error: {type(exc).__name__}: {str(exc)[:160]}"
+            logger.warning("Parallel Task failed for %s: %s", domain, exc)
+            return []
+
     def search(self, query: str) -> list[SearchResult]:
         # Parallel is the primary web research provider when PARALLEL_API_KEY
         # is configured. RSS providers remain a resilience fallback.
