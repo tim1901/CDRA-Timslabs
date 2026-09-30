@@ -32,10 +32,19 @@ class Searcher:
         self.max_results = max_results
         self.provider_status: dict[str, str] = {}
         self.parallel = None
+        self.parallel_task = None
         if settings.parallel_api_key:
+            # Keep Search on the normal HTTP timeout, but give Task its own
+            # long-lived client. Task runs are asynchronous and can take
+            # several minutes before the result endpoint is ready.
             self.parallel = Parallel(
                 api_key=settings.parallel_api_key,
                 timeout=max(30, settings.request_timeout),
+                max_retries=2,
+            )
+            self.parallel_task = Parallel(
+                api_key=settings.parallel_api_key,
+                timeout=max(1800, settings.request_timeout),
                 max_retries=2,
             )
 
@@ -178,7 +187,7 @@ class Searcher:
 
     def task_research(self, company: str, domain: str, window_from: str, window_to: str) -> list[dict]:
         """Run CDRA's full company-development research brief through Parallel Task API."""
-        if not self.parallel:
+        if not self.parallel_task:
             return []
 
         prompt = f"""Research the company {company} ({domain}) for all material company developments that occurred between {window_from} and {window_to}.
@@ -252,12 +261,16 @@ Return only qualifying developments in the requested research window."""
             }
         }
         try:
-            run = self.parallel.task_run.create(
+            self.provider_status["Parallel Task"] = "running"
+            run = self.parallel_task.task_run.create(
                 input=prompt,
                 processor="core",
                 task_spec={"output_schema": output_schema},
             )
-            result = self.parallel.task_run.result(run.run_id, api_timeout=1800)
+            # The Task API is asynchronous. Use the dedicated long-timeout
+            # client so the SDK's result waiter is not constrained by the
+            # shorter Search HTTP timeout.
+            result = self.parallel_task.task_run.result(run.run_id, api_timeout=1800)
             output = getattr(result, "output", None)
             if output is None and isinstance(result, dict):
                 output = result.get("output")
