@@ -68,7 +68,7 @@ def research_status(job_id: str):
     if not job:
         raise HTTPException(404, "Research job not found. Jobs are in-memory and may be lost after a server restart.")
     response = {"job_id": job_id, "status": job["status"]}
-    if job["status"] == "complete": response["result"] = job["result"]
+    if job["status"] == "complete":\n        stored = job["result"]\n        if isinstance(stored, BatchResult):\n            response["batch_result"] = {"results": stored.results}\n        else:\n            response["result"] = stored
     elif job["status"] == "failed": response["error"] = job["error"]
     return response
 
