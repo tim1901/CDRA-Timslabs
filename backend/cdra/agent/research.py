@@ -85,7 +85,7 @@ class ResearchAgent:
         # structured run. We still fetch each cited source and pass it through
         # CDRA's existing evidence/LLM validation layer before returning it.
         parallel_findings = []
-        if domain and self.searcher.parallel:
+        if domain and self.searcher.parallel_task:
             parallel_findings = self.searcher.task_research(company, domain, window_from, window_to)
             for finding in parallel_findings:
                 url = str(finding.get("source_url") or "").strip()
