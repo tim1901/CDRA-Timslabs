@@ -30,7 +30,7 @@ def _run_single(job_id: str, req: ResearchRequest):
     _set_job(job_id, status="running")
     try:
         logger.info("Research job %s started for %s", job_id, req.company_website or req.company)
-        result = ResearchAgent().run(req.company or req.company_website or "", req.lookback_months, req.research_types, company_website=req.company_website)
+        result = ResearchAgent().run(req.company_website or req.company or "", req.lookback_months, req.research_types, company_website=req.company_website)
         _set_job(job_id, status="complete", result=result)
         logger.info("Research job %s completed: %s developments, status=%s", job_id, len(result.developments), result.status)
     except Exception as exc:
