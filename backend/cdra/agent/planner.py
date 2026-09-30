@@ -16,21 +16,27 @@ QUERIES = {
     "regulatory": '"{company}" regulatory OR regulation OR compliance OR approval {year}',
 }
 
+
 def build_queries(
     company: str,
     lookback_months: int,
     types: list[str],
     domain: str | None = None,
 ) -> list[tuple[str, str]]:
-    """Build targeted discovery queries.
+    """Build company-targeted discovery queries.
 
-    The company name is always quoted. When a canonical domain is known,
-    first-party discovery is searched separately with site:<domain>.
+    When the user supplies a URL/domain, the domain is the strongest search
+    identity. This prevents short/ambiguous brands such as "Apollo" from
+    pulling results for unrelated entities such as Apollo Global Management.
     """
     cutoff = date.today() - relativedelta(months=lookback_months)
     years = str(date.today().year)
     if cutoff.year != date.today().year:
         years = f"{cutoff.year} {date.today().year}"
+
+    # Domain-qualified identity is used for external discovery when available.
+    # Keep the human-readable company name for first-party site searches.
+    search_identity = domain if domain else company
 
     queries: list[tuple[str, str]] = []
     for kind in types:
@@ -38,7 +44,7 @@ def build_queries(
         if not template:
             continue
 
-        external = template.format(company=company, year=years)
+        external = template.format(company=search_identity, year=years)
         queries.append((kind, external))
 
         if domain:
