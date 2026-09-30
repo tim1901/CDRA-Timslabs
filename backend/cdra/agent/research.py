@@ -15,31 +15,39 @@ from ..models.schemas import CompanyResult
 def _tokens(value: str) -> set[str]:
     return {x for x in re.findall(r"[a-z0-9]+", value.lower()) if len(x) > 2}
 
+def _normalize_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
 def _entity_match(company: str, domain: str | None, url: str, title: str, snippet: str, text: str) -> bool:
-    corpus = " ".join([title, snippet, text[:12000]]).lower()
-    company_tokens = _tokens(company)
-    if not company_tokens:
-        return True
-    phrase = " ".join(sorted(company_tokens))
-    compact = re.sub(r"[^a-z0-9]+", " ", company.lower()).strip()
-    normalized_corpus = re.sub(r"[^a-z0-9]+", " ", corpus)
-    if compact and compact in normalized_corpus:
-        return True
-    matched = sum(1 for token in company_tokens if re.search(rf"\b{re.escape(token)}\b", normalized_corpus))
-    if len(company_tokens) == 1:
-        return matched == 1
-    if matched >= max(2, len(company_tokens) // 2 + 1):
-        return True
+    """Use deterministic matching only as a hint; ambiguous candidates go to the LLM."""
     host = urlparse(url).netloc.lower().removeprefix("www.")
     if domain:
         target_host = domain.lower().removeprefix("www.")
         if host == target_host or host.endswith("." + target_host):
             return True
-    return False
 
-def _event_key(d):
-    words = _tokens(d.title)
-    return (d.type, d.date, frozenset(words))
+    target = _normalize_text(company)
+    if not target:
+        return True
+
+    title_norm = _normalize_text(title)
+    snippet_norm = _normalize_text(snippet)
+    text_norm = _normalize_text(text[:12000])
+
+    if target in title_norm or target in snippet_norm or target in text_norm:
+        return True
+
+    target_tokens = _tokens(company)
+    if len(target_tokens) > 1:
+        for field in (title_norm, snippet_norm):
+            matched = sum(1 for token in target_tokens if re.search(rf"\b{re.escape(token)}\b", field))
+            if matched >= max(2, len(target_tokens) // 2 + 1):
+                return True
+
+    # Do not reject simply because deterministic matching is inconclusive.
+    # The LLM receives the target company and source evidence and performs
+    # the authoritative entity/materiality check.
+    return True
 
 def _dedupe(developments):
     kept=[]
@@ -71,7 +79,7 @@ class ResearchAgent:
         company, domain = normalize_company(company_input)
         window_from=(date.today()-relativedelta(months=lookback_months)).isoformat()
         window_to=date.today().isoformat()
-        warnings=[]; urls=[]; candidates=[]; seen=set(); search_hits=0; fetch_failures=0; rejected_entities=0
+        warnings=[]; urls=[]; candidates=[]; seen=set(); search_hits=0; fetch_failures=0; rejected_entities=0; llm_candidates=0
         for kind, query in build_queries(company, lookback_months, types):
             results = self.searcher.search(query)
             search_hits += len(results)
@@ -93,11 +101,11 @@ class ResearchAgent:
             page.published_date = published_date
             page.discovery_snippet = snippet
 
-            # Cheap deterministic entity gate before spending an LLM call.
             if not _entity_match(company, domain, url, page.title, snippet, page.text):
                 rejected_entities += 1
                 continue
 
+            llm_candidates += 1
             extracted=self.llm.extract(company, domain, kind, page, window_from, window_to)
             for d in extracted:
                 if window_from <= d.date <= window_to:
@@ -111,6 +119,8 @@ class ResearchAgent:
                 warnings.append("Search provider diagnostics: " + "; ".join(f"{name}: {status}" for name, status in self.searcher.provider_status.items()))
         if rejected_entities:
             warnings.append(f"Rejected {rejected_entities} search candidates because they did not appear to concern the target company.")
+        if llm_candidates:
+            warnings.append(f"Validated {llm_candidates} candidates with the evidence model.")
         if candidates and fetch_failures == len(candidates):
             warnings.append("Search results were found, but none of the source pages or discovery snippets contained enough evidence to analyze.")
         if self.llm.attempts and self.llm.failures == self.llm.attempts:
@@ -121,5 +131,7 @@ class ResearchAgent:
             warnings.append("OPENAI_API_KEY is not configured; research sources were discovered but LLM extraction is disabled.")
         if not candidates:
             warnings.append("No search results were discovered. Try a company domain or LinkedIn URL.")
-        status="complete" if developments or not candidates else "partial"
+
+        operational_failure = bool(self.llm.attempts and self.llm.failures == self.llm.attempts) or (bool(candidates) and fetch_failures == len(candidates))
+        status="failed" if not candidates and search_hits == 0 else ("partial" if operational_failure else "complete")
         return CompanyResult(company=company,domain=domain,research_window_from=window_from,research_window_to=window_to,developments=developments,sources_scanned=len(urls),source_urls=urls,warnings=warnings,status=status)
