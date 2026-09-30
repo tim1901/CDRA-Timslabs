@@ -185,12 +185,21 @@ class Searcher:
             logger.warning("Parallel Search failed for query %s: %s", query, exc)
             return []
 
-    def task_research(self, company: str, domain: str, window_from: str, window_to: str) -> list[dict]:
+    def task_research(self, company_website: str, window_from: str, window_to: str) -> list[dict]:
         """Run CDRA's full company-development research brief through Parallel Task API."""
         if not self.parallel_task:
             return []
+        if not company_website or not company_website.strip():
+            raise ValueError("company_website is required for Parallel Task research")
 
-        prompt = f"""Research the company {company} ({domain}) for all material company developments that occurred between {window_from} and {window_to}.
+        company_website = company_website.strip()
+        prompt = f"""Research the company represented by this website:
+
+{company_website}
+
+Research period: {window_from} to {window_to}.
+
+Identify all material company developments that occurred during this period.
 
 The goal is to identify evidence-backed developments that could provide useful go-to-market intelligence.
 
@@ -215,7 +224,7 @@ Research requirements:
 - Do not treat Google News, Bing, search-result pages, aggregators, or social-media posts as final evidence when the underlying article or company announcement can be found.
 - Do not include a development simply because the company is mentioned in an article.
 - Reject generic articles, educational pages, job boards, directory pages, Wikipedia, opinion pieces, and unrelated companies with similar names.
-- Every development must clearly concern {company}.
+- Every development must clearly concern the company represented by {company_website}.
 - Only include developments whose event date falls within {window_from} to {window_to}.
 - Prefer the date the event actually occurred or was announced rather than a later update date.
 - Do not invent dates, facts, sources, or evidence.
@@ -290,11 +299,11 @@ Return only qualifying developments in the requested research window."""
             if not isinstance(findings, list):
                 raise ValueError("Parallel Task returned an invalid developments list")
             self.provider_status["Parallel Task"] = f"ok ({len(findings)} findings)"
-            logger.info("Parallel Task returned %d findings for %s", len(findings), domain)
+            logger.info("Parallel Task returned %d findings for %s", len(findings), company_website)
             return findings
         except Exception as exc:
             self.provider_status["Parallel Task"] = f"error: {type(exc).__name__}: {str(exc)[:160]}"
-            logger.warning("Parallel Task failed for %s: %s", domain, exc)
+            logger.warning("Parallel Task failed for %s: %s", company_website, exc)
             return []
 
     def search(self, query: str) -> list[SearchResult]:
