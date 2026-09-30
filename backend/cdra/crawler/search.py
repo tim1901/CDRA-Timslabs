@@ -197,8 +197,29 @@ class Searcher:
             "career", "jobs", "hiring", "company", "about", "release",
             "integration", "partner", "customer", "resource"
         )
-        unique = []
+        # Rank candidate URLs before truncating. Sitemap order is often
+        # arbitrary, so taking the first N relevant URLs can miss newsroom
+        # articles and release-note pages with the strongest evidence.
+        ranked = []
         seen = set()
+        priority = (
+            ("announcement", 100),
+            ("newsroom", 100),
+            ("press", 95),
+            ("news", 90),
+            ("release-notes", 90),
+            ("changelog", 90),
+            ("release", 85),
+            ("partner", 75),
+            ("product", 70),
+            ("company", 60),
+            ("about", 50),
+            ("career", 40),
+            ("jobs", 40),
+            ("hiring", 40),
+            ("resource", 30),
+            ("blog", 25),
+        )
         for url in urls:
             parsed = urlparse(url)
             clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
@@ -207,9 +228,16 @@ class Searcher:
             seen.add(clean)
             path = parsed.path.lower()
             if path == "" or any(k in path for k in keywords):
-                unique.append(clean)
-            if len(unique) >= max_pages:
-                break
+                score = 0
+                for token, weight in priority:
+                    if token in path:
+                        score = max(score, weight)
+                depth = len([part for part in path.split("/") if part])
+                score += min(depth, 4)
+                ranked.append((score, clean))
+
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        unique = [url for _, url in ranked[:max_pages]]
 
         results = []
         for url in unique:
